@@ -1,19 +1,23 @@
+// src/index.js
 import { startWhatsApp } from "./bot/whatsappBot.js";
-import { startLeadsListener } from "./firebase/leadsListener.js";
+import { startSendAtWorker } from "./firebase/leadsListener.js";
 import { startServer } from "./server.js";
 async function start() {
   console.log("🚀 Starting automation server...");
 
   const sock = await startWhatsApp();
+	let isInitialized = false;
 
   sock.ev.on("connection.update", (update) => {
     const { connection } = update;
 
-    if (connection === "open") {
+    if (connection === "open" && !isInitialized) {
       console.log("✅ WhatsApp connected");
 
-      startLeadsListener(sock);
+      startSendAtWorker(sock);
       startServer(sock);
+
+      isInitialized = true;
     }
   });
 }

@@ -1,39 +1,31 @@
-import express from "express"
+import express from "express";
 
-export function startServer(sock){
+export function startServer(sock) {
+  const app = express();
 
-const app = express()
+  app.use(express.json());
 
-app.use(express.json())
+  app.post("/send", async (req, res) => {
+    const { phone, message } = req.body;
 
-app.post("/send", async (req,res)=>{
+    if (!phone || !message) {
+      return res.status(400).json({ error: "phone dan message wajib" });
+    }
 
-const { phone, message } = req.body
+    const chatId = phone + "@s.whatsapp.net";
 
-if(!phone || !message){
-return res.status(400).json({error:"phone dan message wajib"})
-}
+    try {
+      await sock.sendMessage(chatId, { text: message });
 
-const chatId = phone + "@s.whatsapp.net"
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
 
-try{
+      res.status(500).json({ error: "gagal kirim pesan" });
+    }
+  });
 
-await sock.sendMessage(chatId,{ text: message })
-
-res.json({success:true})
-
-}catch(err){
-
-console.error(err)
-
-res.status(500).json({error:"gagal kirim pesan"})
-
-}
-
-})
-
-app.listen(8000,()=>{
-console.log("API Test running di http://localhost:8000")
-})
-
+  app.listen(8000, () => {
+    console.log("API Test running di http://localhost:8000");
+  });
 }

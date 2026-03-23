@@ -1,9 +1,10 @@
+// src/bot/whatsappBot.js
 import {
   makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
-
+import { setConnected } from "../state/connection.js";
 import pino from "pino";
 import readline from "readline";
 
@@ -50,13 +51,12 @@ export async function startWhatsApp() {
 
     if (connection === "open") {
       console.log("WhatsApp Connected");
+      setConnected(true);
     }
 
     if (connection === "close") {
-      console.log("Reconnecting in 5 seconds...");
-      setTimeout(() => {
-        startWhatsApp();
-      }, 5000);
+      console.log("❌ WA Disconnect");
+      setConnected(false);
     }
   });
 

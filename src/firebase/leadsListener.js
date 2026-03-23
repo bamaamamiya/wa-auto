@@ -1,34 +1,32 @@
 import { db } from "./firebase.js";
-import { collection, onSnapshot, updateDoc, doc } from "firebase/firestore";
+import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
 import { buildOrderMessage } from "../templates/messageTemplate.js";
 import { sendMessage } from "../utils/helpers.js";
+import { Timestamp } from "firebase/firestore";
 
 const leadsRef = collection(db, "leads");
 
-const randomDelay = () => {
-  const min = 50000; // 50 detik
-  const max = 70000; // 70 detik
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-};
+export const startSendAtWorker = async (bot) => {
+  console.log("👀 Worker SendAt aktif...");
 
-export const startLeadsListener = (bot) => {
-  console.log("👀 Listener Firebase aktif...");
+  setInterval(async () => {
+    const now = Timestamp.now()
 
-  onSnapshot(leadsRef, (snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type !== "added") return;
+    // query semua leads yang ready untuk dikirim
+    const q = query(
+      leadsRef,
+      where("automation", "==", true),
+      where("messageSent", "==", false),
+      where("sendAt", "<=", now)
+    );
 
-      const data = change.doc.data();
-      const leadId = change.doc.id;
+    const snapshot = await getDocs(q);
 
-      // Validasi data penting
-      if (!data.whatsapp) return;
-      if (data.automation !== true) return;
-      if (data.messageSent !== false) return;
-      if (!data.productTitle) return;
+    snapshot.forEach(async (docSnap) => {
+      const data = docSnap.data();
+      const leadId = docSnap.id;
 
       const chatId = formatPhone(data.whatsapp);
-
       const message = buildOrderMessage({
         name: data.name,
         productTitle: data.productTitle,
@@ -37,31 +35,24 @@ export const startLeadsListener = (bot) => {
         addressClean: data.addressClean,
       });
 
-      const delay = randomDelay();
+      // LOCK biar ga double-send
+      await updateDoc(doc(db, "leads", leadId), { messageSent: "processing" });
 
-      console.log(
-        `⏳ Menunggu ${Math.round(delay / 1000)} detik sebelum kirim ke ${chatId}`,
-      );
+      try {
+        await sendMessage(bot, chatId, message);
 
-      setTimeout(async () => {
-        try {
-          await sendMessage(bot, chatId, message);
+        await updateDoc(doc(db, "leads", leadId), {
+          messageSent: true,
+          messageSentAt: new Date(),
+        });
 
-          await updateDoc(doc(db, "leads", leadId), {
-            messageSent: true,
-            messageSentAt: new Date(),
-          });
-
-          console.log("✅ Pesan terkirim:", chatId);
-        } catch (err) {
-          console.error("❌ Gagal kirim pesan:", err);
-        }
-      }, delay);
+        console.log("✅ Pesan terkirim:", chatId);
+      } catch (err) {
+        console.error("❌ Error kirim:", chatId, err);
+        await updateDoc(doc(db, "leads", leadId), { messageSent: false });
+      }
     });
-  });
+  }, 10000); // cek tiap 10 detik
 };
 
-const formatPhone = (phone) => {
-  const clean = phone.replace(/\D/g, "");
-  return clean + "@s.whatsapp.net";
-};
+const formatPhone = (phone) => phone.replace(/\D/g, "") + "@s.whatsapp.net";
