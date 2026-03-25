@@ -3,11 +3,12 @@ import {
   collection,
   query,
   where,
-  onSnapshot,
+  getDocs,
   updateDoc,
   doc,
   serverTimestamp,
   limit,
+  orderBy,
 } from "firebase/firestore";
 
 import { buildOrderMessage } from "../templates/messageTemplate.js";
@@ -19,50 +20,33 @@ const leadsRef = collection(db, "leads");
 export const startSendAtWorker = (bot) => {
   console.log("🚀 Worker starting...");
 
-  // ❌ isActive dihapus
-  const q = query(leadsRef, where("automation", "==", true),
-	limit(10)
+  const processBatch = async () => {
+    try {
+      const q = query(
+        leadsRef,
+        where("automation", "==", true),
+        where("queuedForMessage", "==", true),
+        limit(10),
+      );
 
-);
+      const snapshot = await getDocs(q);
 
-  onSnapshot(q, async (snapshot) => {
-    const changes = snapshot.docChanges();
-
-    for (const change of changes) {
-      if (change.type !== "added" && change.type !== "modified") continue;
-
-      const docSnap = change.doc;
-      const data = docSnap.data();
-      const leadId = docSnap.id;
-
-      try {
+      for (const docSnap of snapshot.docs) {
+        const data = docSnap.data();
+        const leadId = docSnap.id;
         const now = Date.now();
-        const delay = 15000; // 15detik
-
+        const delay = 15000;
         const lastAt = data.lastMessageAt?.toMillis?.() || 0;
         const validStates = ["WAITING_CONFIRMATION", "WAITING_UPSELL"];
 
-        // 🔥 CORE LOGIC
-        const shouldSend =
-          data.state && // ada state
-          validStates.includes(data.state) && // state termasuk yang valid
-          data.state !== data.lastMessageState && // belum pernah dikirim pesan untuk state ini
-          now - lastAt > delay; // delay sudah lewat
-
-        if (!shouldSend) {
+        if (!data.state || !validStates.includes(data.state) || now - lastAt < delay) {
           console.log("⏭️ Skip:", leadId);
           continue;
         }
 
         const chatId = formatPhone(data.whatsapp);
-
         let message = "";
-        if (!data.state) {
-          console.log("⏭️ Skip karena tidak ada state:", leadId);
-          continue;
-        }
 
-        // 🔥 STATE MACHINE
         if (data.state === "WAITING_CONFIRMATION") {
           message = buildOrderMessage({
             name: data.name,
@@ -71,39 +55,32 @@ export const startSendAtWorker = (bot) => {
             ongkir: data.ongkir,
             addressClean: data.addressClean,
           });
-        }
-
-        if (data.state === "WAITING_UPSELL") {
+        } else if (data.state === "WAITING_UPSELL") {
           message = buildUpsellMessage(data);
         }
 
-        if (!message) {
-          console.log("⚠️ No message for state:", data.state);
-          continue;
-        }
+        if (!message) continue;
 
         console.log("📤 Sending:", data.state, chatId);
-
         await sendMessage(bot, chatId, message);
 
-        // ✅ UPDATE STATE SETELAH KIRIM
+        // ✅ Update lead setelah kirim
         await updateDoc(doc(db, "leads", leadId), {
           lastMessageState: data.state,
           lastMessageAt: serverTimestamp(),
+          queuedForMessage: false, // set false biar gak dikirim lagi
         });
 
         console.log("✅ DONE:", leadId);
-      } catch (err) {
-        console.error("❌ ERROR:", leadId, err);
       }
+    } catch (err) {
+      console.error("❌ ERROR batch:", err);
     }
-  });
+  };
 
-  setInterval(() => {
-    console.log("💓 Worker alive...");
-  }, 30000);
+  // jalankan batch tiap 5 detik
+  setInterval(processBatch, 5000);
+  console.log("💓 Worker alive...");
 };
 
-const formatPhone = (phone) => {
-  return phone.replace(/\D/g, "") + "@s.whatsapp.net";
-};
+const formatPhone = (phone) => phone.replace(/\D/g, "") + "@s.whatsapp.net";
