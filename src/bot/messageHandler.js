@@ -73,18 +73,23 @@ export const handleIncomingMessage = async (msg, bot) => {
       if (selected) {
         console.log("🔥 UPSOLD:", selected.title);
 
-        const newTotal = lead.price + selected.price + lead.ongkir;
+        const newTotal = lead.price + selected.price + (lead.ongkir || 0);
 
+        // Update Firestore dengan snapshot upsell
         await updateDoc(doc(db, "leads", leadId), {
-          selectedUpsell: selected,
+          productTitle: `${lead.productTitle} + ${selected.title}`,
+          price: lead.price + selected.price,
+          costProduct: lead.costProduct + selected.cost,
+          upsellId: selected.id,               // simpan id
+          selectedUpsell: { ...selected },     // simpan snapshot lengkap
           total: newTotal,
-          state: "DONE", // baru diset DONE di sini
+          state: "DONE",
         });
 
         // Kirim konfirmasi rincian
         const confirmationMsg = buildUpsellConfirmationMessage({
           ...lead,
-          selectedUpsell: selected,
+          upsellId: selected,
         });
         await sendMessage(bot, jid, confirmationMsg);
 

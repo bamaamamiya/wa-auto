@@ -26,6 +26,8 @@ export const startSendAtWorker = (bot) => {
         leadsRef,
         where("automation", "==", true),
         where("queuedForMessage", "==", true),
+        where("nextSendAt", "<=", new Date()),
+        orderBy("nextSendAt"),
         limit(10),
       );
 
@@ -39,7 +41,11 @@ export const startSendAtWorker = (bot) => {
         const lastAt = data.lastMessageAt?.toMillis?.() || 0;
         const validStates = ["WAITING_CONFIRMATION", "WAITING_UPSELL"];
 
-        if (!data.state || !validStates.includes(data.state) || now - lastAt < delay) {
+        if (
+          !data.state ||
+          !validStates.includes(data.state) ||
+          now - lastAt < delay
+        ) {
           console.log("⏭️ Skip:", leadId);
           continue;
         }
@@ -79,7 +85,7 @@ export const startSendAtWorker = (bot) => {
   };
 
   // jalankan batch tiap 5 detik
-  setInterval(processBatch, 5000);
+  setInterval(processBatch, 15000);
   console.log("💓 Worker alive...");
 };
 
