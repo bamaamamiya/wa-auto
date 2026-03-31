@@ -36,11 +36,14 @@ export const startSendAtWorker = (bot) => {
       for (const docSnap of snapshot.docs) {
         const data = docSnap.data();
         const leadId = docSnap.id;
+				
         const now = Date.now();
         const delay = 15000;
         const lastAt = data.lastMessageAt?.toMillis?.() || 0;
+
         const validStates = ["WAITING_CONFIRMATION", "WAITING_UPSELL"];
 
+				  // 🚫 VALIDATION
         if (
           !data.state ||
           !validStates.includes(data.state) ||
@@ -85,7 +88,7 @@ export const startSendAtWorker = (bot) => {
   };
 
   // jalankan batch tiap 5 detik
-  setInterval(processBatch, 15000);
+  setInterval(processBatch, 30000);
   console.log("💓 Worker alive...");
 };
 

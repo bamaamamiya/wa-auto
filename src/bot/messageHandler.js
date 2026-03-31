@@ -89,7 +89,7 @@ export const handleIncomingMessage = async (msg, bot) => {
         // Kirim konfirmasi rincian
         const confirmationMsg = buildUpsellConfirmationMessage({
           ...lead,
-          upsellId: selected,
+          selectedUpsell: selected,
         });
         await sendMessage(bot, jid, confirmationMsg);
 

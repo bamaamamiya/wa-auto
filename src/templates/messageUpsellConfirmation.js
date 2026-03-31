@@ -1,34 +1,34 @@
 export const buildUpsellConfirmationMessage = (lead) => {
   const formatHargaSingkat = (value) => {
     if (!value) return "-";
-    if (value >= 1000000)
-      return (value / 1000000).toFixed(1).replace(".0", "") + "jt";
+    if (value >= 1_000_000) return (value / 1_000_000).toFixed(1).replace(".0", "") + "jt";
     return Math.round(value / 1000) + "rb";
   };
 
-	// Gunakan price awal
-	const productPrice = lead.productPrice || lead.price - (lead.selectedUpsell?.price || 0)
-	const upsellPrice = lead.selectedUpsell?.price || 0
-	const ongkir = lead.ongkir || 0
-  const total = productPrice + upsellPrice + ongkir
+  // Produk utama (harga sebelum upsell)
+  const mainProductPrice = lead.price - (lead.selectedUpsell?.price || 0);
+
+  const upsells = lead.selectedUpsell ? [lead.selectedUpsell] : [];
+  const ongkir = lead.ongkir || 0;
+  const total = mainProductPrice + upsells.reduce((acc, u) => acc + (u.price || 0), 0) + ongkir;
 
   const lines = [];
-  lines.push("Baik kak, kami update ya 🙏");
+  lines.push("Baik kak, kami update ya 🙏\n");
 
   // Produk utama
-  lines.push(`📌 ${lead.productTitle.replace(/ \+ .+$/, "")} : ${formatHargaSingkat(productPrice)}`);
+  const mainProductTitle = lead.productTitle?.split(" + ")[0] || lead.productTitle || "Produk";
+  lines.push(`📌 ${mainProductTitle} : ${formatHargaSingkat(mainProductPrice)}`);
 
-  // Upsell (jika ada)
-  if (lead.selectedUpsell) {
-    lines.push(`📌 ${lead.selectedUpsell.title} : ${formatHargaSingkat(upsellPrice)}`);
-  }
+  // Upsell
+  upsells.forEach((u) => {
+    lines.push(`📌 ${u.title} : ${formatHargaSingkat(u.price)}`);
+  });
 
   // Ongkir
-  lines.push(`📌 Ongkir : ${formatHargaSingkat(ongkir)}`);
+  lines.push(`📌 Ongkir : ${formatHargaSingkat(ongkir)}\n`);
 
   // Total
   lines.push(`Total : ${formatHargaSingkat(total)}\n`);
-
   lines.push("Ini rincian terbarunya 🙏");
 
   return lines.join("\n");
