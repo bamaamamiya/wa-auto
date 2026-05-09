@@ -63,7 +63,7 @@ export const startSendAtWorker = () => {
 
           // random delay anti spam
           const delay = Math.floor(Math.random() * 8000) + 3000;
-					
+
           console.log(`😴 Sleep ${delay}ms`);
           await sleep(delay);
         }
@@ -197,7 +197,8 @@ const processLead = async (docSnap) => {
     console.log("✅ Message sent:", leadId);
 
     await updateDoc(doc(db, "leads", leadId), {
-      state: "DONE",
+      chatId,
+      state: "WAITING_CONFIRMATION",
 
       lastMessageState: "WAITING_CONFIRMATION",
 

@@ -3,7 +3,7 @@
 import { startWhatsApp } from "./bot/whatsappBot.js";
 import { startSendAtWorker } from "./firebase/leadsListener.js";
 import { startServer } from "./server.js";
-
+import { startIncomingMessageListener } from "./bot/incomingMessageListener.js";
 async function start() {
   console.log("🚀 Starting automation server...");
 
@@ -18,7 +18,7 @@ async function start() {
       console.log("✅ WhatsApp connected");
 
       startSendAtWorker();
-
+			startIncomingMessageListener(sock);
       startServer();
 
       initialized = true;
