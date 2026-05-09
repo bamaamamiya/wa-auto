@@ -1,35 +1,41 @@
 export const buildUpsellConfirmationMessage = (lead) => {
   const formatHargaSingkat = (value) => {
     if (!value) return "-";
-    if (value >= 1_000_000) return (value / 1_000_000).toFixed(1).replace(".0", "") + "jt";
+    if (value >= 1_000_000)
+      return (value / 1_000_000).toFixed(1).replace(".0", "") + "jt";
     return Math.round(value / 1000) + "rb";
   };
 
-  // Produk utama (harga sebelum upsell)
-  const mainProductPrice = lead.price - (lead.selectedUpsell?.price || 0);
+  const mainProductPrice =
+    lead.price - (lead.selectedUpsell?.price || 0);
 
-  const upsells = lead.selectedUpsell ? [lead.selectedUpsell] : [];
+  const upsell = lead.selectedUpsell;
   const ongkir = lead.ongkir || 0;
-  const total = mainProductPrice + upsells.reduce((acc, u) => acc + (u.price || 0), 0) + ongkir;
+  const total =
+    mainProductPrice + (upsell?.price || 0) + ongkir;
 
-  const lines = [];
-  lines.push("Baik kak, kami update ya 🙏\n");
+  // ✅ ambil hanya produk utama
+  const mainProductTitle =
+    lead.productTitle?.split(" + ")[0] || "Produk";
 
-  // Produk utama
-  const mainProductTitle = lead.productTitle?.split(" + ")[0] || lead.productTitle || "Produk";
-  lines.push(`📌 ${mainProductTitle} : ${formatHargaSingkat(mainProductPrice)}`);
+  // ✅ format upsell jadi "Memori 32GB"
+  const upsellTitle = upsell
+    ? `Memori ${upsell.code?.toUpperCase()}`
+    : null;
 
-  // Upsell
-  upsells.forEach((u) => {
-    lines.push(`📌 ${u.title} : ${formatHargaSingkat(u.price)}`);
-  });
+  let text = `Baik kak, kami update ya 🙏\n`;
 
-  // Ongkir
-  lines.push(`📌 Ongkir : ${formatHargaSingkat(ongkir)}\n`);
+  text += `📌 ${mainProductTitle} : ${formatHargaSingkat(mainProductPrice)}\n`;
 
-  // Total
-  lines.push(`Total : ${formatHargaSingkat(total)}\n`);
-  lines.push("Ini rincian terbarunya 🙏");
+  if (upsell) {
+    text += `📌 ${upsellTitle} : ${formatHargaSingkat(upsell.price)}\n`;
+  }
 
-  return lines.join("\n");
+  text += `📌 Ongkir : ${formatHargaSingkat(ongkir)}\n`;
+
+  text += `Total : ${formatHargaSingkat(total)}\n\n`;
+
+  text += `ini rincian terbarunya🙏`;
+
+  return text;
 };

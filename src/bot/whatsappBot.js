@@ -4,16 +4,19 @@ import {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
-import { setConnected } from "../state/connection.js";
+import { setConnected } from "../states/connection.js";
 import pino from "pino";
 import readline from "readline";
-import { handleIncomingMessage } from "./messageHandler.js";
 
 const usePairingCode = true;
 
-function question(text) {
-  console.log("❓ Prompt input:", text);
+let globalSock = null;
 
+export function getSock() {
+  return globalSock;
+}
+
+function question(text) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -21,7 +24,6 @@ function question(text) {
 
   return new Promise((resolve) => {
     rl.question(text, (answer) => {
-      console.log("✍️ Input received:", answer);
       rl.close();
       resolve(answer);
     });
@@ -31,11 +33,17 @@ function question(text) {
 export async function startWhatsApp() {
   console.log("🚀 Starting WhatsApp bot...");
 
+  // 🔥 CLOSE OLD SOCKET
+  if (globalSock) {
+    console.log("♻️ Closing old socket...");
+    try {
+      globalSock.end?.();
+    } catch {}
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState("./session");
-  console.log("💾 Auth state loaded");
 
   const { version } = await fetchLatestBaileysVersion();
-  console.log("📦 Baileys version:", version);
 
   const sock = makeWASocket({
     auth: state,
@@ -44,37 +52,26 @@ export async function startWhatsApp() {
     printQRInTerminal: !usePairingCode,
   });
 
+  globalSock = sock;
+
   console.log("🔌 Socket created");
 
   // 🔐 Pairing
   if (usePairingCode && !sock.authState.creds.registered) {
-    console.log("🔑 Device belum terdaftar, mulai pairing...");
+    console.log("🔑 Device belum terdaftar...");
 
     const phoneNumber = await question("Masukkan nomor (62xxx): ");
-    console.log("📱 Nomor dimasukkan:", phoneNumber);
-
     const code = await sock.requestPairingCode(phoneNumber.trim());
 
     console.log("🔐 Pairing Code:", code);
-  } else {
-    console.log("✅ Sudah terdaftar, skip pairing");
   }
 
   // 💾 Save session
-  sock.ev.on("creds.update", (creds) => {
-    console.log("💾 Creds update triggered");
-    saveCreds(creds);
-  });
+  sock.ev.on("creds.update", saveCreds);
 
-  // 🔥 Connection monitor (SUPER IMPORTANT)
+  // 🔥 CONNECTION HANDLER
   sock.ev.on("connection.update", (update) => {
-    console.log("📡 Connection update raw:", update);
-
     const { connection, lastDisconnect } = update;
-
-    if (connection === "connecting") {
-      console.log("⏳ Connecting ke WhatsApp...");
-    }
 
     if (connection === "open") {
       console.log("✅ WhatsApp Connected");
@@ -86,33 +83,16 @@ export async function startWhatsApp() {
       setConnected(false);
 
       if (lastDisconnect?.error) {
-        console.error("⚠️ Disconnect reason:");
-        console.error(lastDisconnect.error);
-
-        if (lastDisconnect.error?.output?.statusCode) {
-          console.error(
-            "📊 Status Code:",
-            lastDisconnect.error.output.statusCode,
-          );
-        }
+        console.error("⚠️", lastDisconnect.error?.output?.statusCode);
       }
 
-      console.log("🔄 Menunggu reconnect otomatis...");
+      console.log("🔄 Reconnecting in 5 seconds...");
+
+      setTimeout(() => {
+        startWhatsApp();
+      }, 5000);
     }
   });
-
-  // 📨 Message event listener (biar kamu lihat kalau ada message masuk)
-  sock.ev.on("messages.upsert", async (m) => {
-    const msg = m.messages?.[0];
-    if (!msg) return;
-
-    await handleIncomingMessage(msg, sock);
-  });
-
-  // 💓 Heartbeat
-  setInterval(() => {
-    console.log("💓 WhatsApp bot masih hidup...");
-  }, 30000);
 
   return sock;
 }
