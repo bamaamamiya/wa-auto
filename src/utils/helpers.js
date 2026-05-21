@@ -1,6 +1,6 @@
 import { isConnected } from "../states/connection.js";
 export const sendMessage = async (bot, jid, message) => {
-  if (!isConnected) {
+  if (!isConnected()) {
     console.log("⛔ Skip kirim, WA belum connect:", jid);
     throw new Error("WA not connected");
   }

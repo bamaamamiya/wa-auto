@@ -19,7 +19,7 @@ async function start() {
 
       startSendAtWorker();
 			startIncomingMessageListener(sock);
-      startServer();
+      startServer(sock);
 
       initialized = true;
 
