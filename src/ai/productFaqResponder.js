@@ -1,3 +1,4 @@
+// productFaqResponder.js
 import { chatWithOllama } from "./ollamaClient.js";
 import { buildFaqSystemPrompt } from "./faqPrompt.js";
 import {
@@ -46,6 +47,14 @@ const JAVA_PROVINCES = new Set([
   "yogyakarta",
 ]);
 
+const SEARCHABLE_PATHS = new Set([
+  "faq",
+  "shipping",
+  "policy",
+  "spec",
+  "features",
+]);
+
 const getLeadProvince = (lead) => {
   return (
     lead.province ||
@@ -92,6 +101,16 @@ const isGreeting = (question) => {
     "assalamualaikum",
     "permisi",
   ].includes(normalized);
+};
+
+const detectIntent = (question) => {
+  const q = normalizeText(question);
+
+  const matched = INTENT_GROUPS.find((intent) =>
+    intent.keywords.some((keyword) => includesPhraseOrToken(q, keyword)),
+  );
+
+  return matched?.name || "default";
 };
 
 const buildLeadContext = (lead) => {
@@ -150,7 +169,14 @@ const flattenKnowledge = (value, path = "") => {
 
   if (typeof value === "object") {
     return Object.entries(value).flatMap(([key, item]) => {
-      return flattenKnowledge(item, `${path}.${key}`.replace(/^\./, ""));
+      const currentPath = `${path}.${key}`.replace(/^\./, "");
+
+      // hanya root tertentu yang boleh searchable
+      if (!path && !SEARCHABLE_PATHS.has(key)) {
+        return [];
+      }
+
+      return flattenKnowledge(item, currentPath);
     });
   }
 
@@ -229,7 +255,11 @@ const addFactByPath = ({ facts, lead, product, path }) => {
   }
 
   if (path.startsWith("general.")) {
-    addFact(facts, path, getByPath(GENERAL_FACTS, path.replace("general.", "")));
+    addFact(
+      facts,
+      path,
+      getByPath(GENERAL_FACTS, path.replace("general.", "")),
+    );
     return;
   }
 
@@ -264,19 +294,20 @@ const includesPhraseOrToken = (question, phrase) => {
 
 const getFaqMatchedFacts = (product, question) => {
   const facts = [];
-  const questionText = normalizeText(question);
 
-  (product.faq || []).forEach((faq) => {
-    const matched = (faq.intent || []).some((intent) => {
-      return questionText.includes(normalizeText(intent));
-    });
+  for (const faq of product.faq || []) {
+    const intents = faq.intent || [];
 
-    if (!matched) return;
+    const matched = intents.some((intent) =>
+      includesPhraseOrToken(question, intent),
+    );
 
-    (faq.retrieve || []).forEach((path) => {
+    if (!matched) continue;
+
+    for (const path of faq.retrieve || []) {
       addFact(facts, path, getByPath(product, path));
-    });
-  });
+    }
+  }
 
   return facts;
 };
@@ -314,9 +345,9 @@ const getSearchMatchedFacts = (product, question) => {
 
       return { ...fact, score };
     })
-    .filter((fact) => fact.score > 0)
+    .filter((fact) => fact.score > 2)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 16)
+    .slice(0, 6)
     .map((fact) => fact.text);
 };
 
@@ -362,22 +393,16 @@ const getOrderMatchedFacts = (lead, question) => {
 
 const buildRelevantFacts = ({ lead, product, question }) => {
   const orderFacts = getOrderMatchedFacts(lead, question);
+  const faqFacts = getFaqMatchedFacts(product, question);
+  const intentFacts = getIntentMatchedFacts({ lead, product, question });
+  const searchFacts = getSearchMatchedFacts(product, question);
 
-  if (!product) {
-    return {
-      isRelated: orderFacts.length > 0,
-      text:
-        orderFacts.join("\n") ||
-        "Product document tidak ditemukan dari product_id order.",
-    };
-  }
+  const hasStrongMatch =
+    orderFacts.length > 0 || faqFacts.length > 0 
 
-  const facts = [
-    ...orderFacts,
-    ...getFaqMatchedFacts(product, question),
-    ...getIntentMatchedFacts({ lead, product, question }),
-    ...getSearchMatchedFacts(product, question),
-  ];
+  if (!hasStrongMatch) return { isRelated: false, text: "" };
+
+  const facts = [...orderFacts, ...faqFacts, ...intentFacts, ...searchFacts];
 
   if (facts.length === 0) return { isRelated: false, text: "" };
 
@@ -404,10 +429,22 @@ export const buildProductFaqReply = async ({ lead, product, question }) => {
   if (!relevantFacts.isRelated) {
     return OUT_OF_SCOPE_REPLY;
   }
+  console.log("\n========== FAQ DEBUG ==========");
+  console.log("QUESTION:");
+  console.log(question);
+
+  console.log("\nORDER CONTEXT:");
+  console.log(buildLeadContext(lead));
+
+  console.log("\nFACTS:");
+  console.log(relevantFacts.text);
+
+  console.log("===============================\n");
 
   const systemPrompt = buildFaqSystemPrompt();
 
   const userPrompt = `
+	
 DATA ORDER:
 ${buildLeadContext(lead)}
 
@@ -416,6 +453,10 @@ ${relevantFacts.text}
 
 PERTANYAAN CUSTOMER:
 ${question}
+
+TUGAS :
+Jawab HANYA berdasarkan fakta di atas.
+Jika tidak ada → bilang tidak tersedia.
 `.trim();
 
   return chatWithOllama(
@@ -424,8 +465,11 @@ ${question}
       { role: "user", content: userPrompt },
     ],
     {
-      temperature: 0.1,
-      numPredict: 140,
+      temperature: 0,
+      num_predict: 140,
+      seed: 42,
+      repeat_penalty: 1.1,
+      num_ctx: 2048,
     },
   );
 };

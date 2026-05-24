@@ -21,12 +21,7 @@ import { findProductForLead } from "../firebase/productRepository.js";
 import { sendMessage } from "../utils/helpers.js";
 
 const getIncomingChatId = (msg) => {
-  return (
-    msg.key.remoteJidAlt ||
-    msg.key.participant ||
-    msg.key.remoteJid ||
-    ""
-  );
+  return msg.key.remoteJidAlt || msg.key.participant || msg.key.remoteJid || "";
 };
 
 const findLeadByChat = async (chatId, sender) => {
@@ -102,11 +97,19 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
       product,
       question,
     });
+    console.log("\n========== AI OUTPUT ==========");
+    console.log(reply);
+    console.log("===============================\n");
 
     if (!reply) {
       console.log("Empty AI reply:", leadDoc.id);
       return;
     }
+
+    console.log("\n========== WA SEND ==========");
+    console.log(chatId);
+    console.log(reply);
+    console.log("=============================\n");
 
     await sendMessage(sock, chatId, reply);
 
@@ -143,9 +146,7 @@ export const startIncomingMessageListener = (sock) => {
 
       const chatId = jidNormalizedUser(rawChatId);
 
-      const sender = chatId
-        .replace("@s.whatsapp.net", "")
-        .replace(/\D/g, "");
+      const sender = chatId.replace("@s.whatsapp.net", "").replace(/\D/g, "");
 
       const text =
         msg.message?.conversation ||
