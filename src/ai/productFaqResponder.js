@@ -394,13 +394,13 @@ const getOrderMatchedFacts = (lead, question) => {
 const buildRelevantFacts = ({ lead, product, question }) => {
   const orderFacts = getOrderMatchedFacts(lead, question);
   const faqFacts = getFaqMatchedFacts(product, question);
-  const intentFacts = getIntentMatchedFacts({ lead, product, question });
-  const searchFacts = getSearchMatchedFacts(product, question);
 
-  const hasStrongMatch =
-    orderFacts.length > 0 || faqFacts.length > 0 
+  const hasStrongMatch = orderFacts.length > 0 || faqFacts.length > 0;
 
   if (!hasStrongMatch) return { isRelated: false, text: "" };
+
+  const intentFacts = getIntentMatchedFacts({ lead, product, question });
+  const searchFacts = getSearchMatchedFacts(product, question);
 
   const facts = [...orderFacts, ...faqFacts, ...intentFacts, ...searchFacts];
 
