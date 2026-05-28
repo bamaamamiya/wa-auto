@@ -4,6 +4,8 @@ import { startWhatsApp } from "./bot/whatsappBot.js";
 import { startSendAtWorker } from "./firebase/leadsListener.js";
 import { startServer } from "./server.js";
 import { startIncomingMessageListener } from "./bot/incomingMessageListener.js";
+// import { startScheduler } from "./bot/scheduler.js";
+
 async function start() {
   console.log("🚀 Starting automation server...");
 
@@ -14,17 +16,23 @@ async function start() {
   sock.ev.on("connection.update", ({ connection }) => {
     console.log("📡 WA Connection:", connection);
 
-    if (connection === "open" && !initialized) {
-      console.log("✅ WhatsApp connected");
+    if (connection !== "open") return;
 
-      startSendAtWorker();
-			startIncomingMessageListener(sock);
-      startServer(sock);
-
-      initialized = true;
-
-      console.log("🔥 System ready");
+    if (initialized) {
+      console.log("⚡ Services already running");
+      return;
     }
+
+    initialized = true;
+
+    console.log("✅ WhatsApp connected");
+    startSendAtWorker();
+    startIncomingMessageListener(sock);
+    // reminder confirmation
+    // startScheduler(sock);
+    startServer(sock);
+
+    console.log("🔥 System ready");
   });
 }
 

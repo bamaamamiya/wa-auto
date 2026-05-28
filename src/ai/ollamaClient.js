@@ -22,14 +22,14 @@ export const requestOllama = async (messages, options = {}) => {
     content: String(m.content).slice(0, MAX_CHARS),
   }));
 
-  console.log("\n========== OLLAMA INPUT ==========");
+  // console.log("\n========== OLLAMA INPUT ==========");
 
-  safeMessages.forEach((m, i) => {
-    console.log(`\n[${i}] ROLE: ${m.role}`);
-    console.log(m.content);
-  });
+  // safeMessages.forEach((m, i) => {
+  //   console.log(`\n[${i}] ROLE: ${m.role}`);
+  //   console.log(m.content);
+  // });
 
-  console.log("\n==================================\n");
+  // console.log("\n==================================\n");
 
   try {
     console.log("[Ollama] Request started", {
@@ -67,9 +67,9 @@ export const requestOllama = async (messages, options = {}) => {
     const data = await response.json();
     const content = data.message?.content?.trim() || "";
 
-    console.log("\n========== OLLAMA OUTPUT ==========");
-    console.log(content);
-    console.log("===================================\n");
+    // console.log("\n========== OLLAMA OUTPUT ==========");
+    // console.log(content);
+    // console.log("===================================\n");
 
     console.log("[Ollama] Reply received", {
       model,

@@ -26,8 +26,10 @@ Total Pembayaran: ${formatHargaSingkat(total)}
 Nama: ${data.name || "-"}
 Alamat Lengkap: ${data.addressClean || "-"}
 
-Apakah alamat yang Kakak berikan sudah benar?
-Kami akan segera proses pesanan Kakak jika alamatnya sudah sesuai ya🙏
+Mohon dicek kembali ya kak 🙏
+
+Jika data & alamat sudah sesuai → cukup balas bebas seperti:
+iya / sudah benar / lanjut
 
 Untuk ongkir, akan dihitung otomatis dan dianggap disetujui oleh sistem.
 `;

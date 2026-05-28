@@ -12,10 +12,8 @@ import {
 import { jidNormalizedUser } from "@whiskeysockets/baileys";
 
 import { db } from "../firebase/firebase.js";
-import {
-  isAddressConfirmation,
-  isConfirmation,
-} from "../utils/messageDetector.js";
+import { isAddressConfirmation } from "../utils/messageDetector.js";
+import { hasConfirmIntent } from "../utils/confirmationDetector.js";
 import { buildProductFaqReply } from "../ai/productFaqResponder.js";
 import { findProductForLead } from "../firebase/productRepository.js";
 import { sendMessage } from "../utils/helpers.js";
@@ -24,29 +22,44 @@ const getIncomingChatId = (msg) => {
   return msg.key.remoteJidAlt || msg.key.participant || msg.key.remoteJid || "";
 };
 
-const findLeadByChat = async (chatId, sender) => {
-  const byChatId = query(
-    collection(db, "leads"),
-    where("chatId", "==", chatId),
-    limit(1),
-  );
+const safeUpdate = async (ref, data, retries = 5) => {
+  let lastError;
 
-  const chatSnapshot = await getDocs(byChatId);
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await updateDoc(ref, data);
+    } catch (e) {
+      lastError = e;
 
-  if (!chatSnapshot.empty) {
-    return chatSnapshot.docs[0];
+      if (e.code !== "resource-exhausted") {
+        throw e;
+      }
+
+      const wait = Math.min(1000 * 2 ** i, 10000);
+
+      console.log(`Retry write (${i + 1}) in ${wait}ms`);
+
+      await new Promise((r) => setTimeout(r, wait));
+    }
   }
 
-  const byWhatsapp = query(
-    collection(db, "leads"),
-    where("whatsapp", "==", sender),
-    limit(1),
-  );
+  throw lastError;
+};
 
-  const phoneSnapshot = await getDocs(byWhatsapp);
+const findLeadByChat = async (chatId, sender) => {
+  const conditions = [
+    ["chatId", chatId],
+    ["whatsapp", sender],
+  ];
 
-  if (!phoneSnapshot.empty) {
-    return phoneSnapshot.docs[0];
+  for (const [field, value] of conditions) {
+    const snap = await getDocs(
+      query(collection(db, "leads"), where(field, "==", value), limit(1)),
+    );
+
+    if (!snap.empty) {
+      return snap.docs[0];
+    }
   }
 
   return null;
@@ -61,14 +74,23 @@ const timestampToMillis = (value) => {
 
 const canConfirmAddress = (lead, text) => {
   if (!lead) return false;
+
   if (lead.confirmation !== "belum") return false;
+
   if (lead.state !== "WAITING_CONFIRMATION") return false;
+
   if (lead.lastMessageState !== "WAITING_CONFIRMATION") return false;
 
-  if (isAddressConfirmation(text)) return true;
-  if (!isConfirmation(text)) return false;
+  if (isAddressConfirmation(text)) {
+    return true;
+  }
+
+  if (!hasConfirmIntent(text)) {
+    return false;
+  }
 
   const lastOrderMessageAt = timestampToMillis(lead.lastMessageAt);
+
   const lastAiReplyAt = timestampToMillis(lead.lastAiReplyAt);
 
   return lastAiReplyAt <= lastOrderMessageAt;
@@ -82,6 +104,11 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
 
   try {
     const lead = leadDoc.data();
+    const lastReply = timestampToMillis(lead.lastAiReplyAt);
+    if (Date.now() - lastReply < 3000) {
+      console.log("Skip rapid reply");
+      return;
+    }
     const productDoc = await findProductForLead(lead);
     const product = productDoc?.data() || null;
 
@@ -97,6 +124,7 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
       product,
       question,
     });
+
     console.log("\n========== AI OUTPUT ==========");
     console.log(reply);
     console.log("===============================\n");
@@ -106,6 +134,11 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
       return;
     }
 
+    // TAMBAH DI SINI
+    if (lead.lastAiQuestion === question && lead.lastAiReply === reply) {
+      console.log("Skip duplicate reply");
+      return;
+    }
     console.log("\n========== WA SEND ==========");
     console.log(chatId);
     console.log(reply);
@@ -113,11 +146,10 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
 
     await sendMessage(sock, chatId, reply);
 
-    await updateDoc(doc(db, "leads", leadDoc.id), {
+    await safeUpdate(doc(db, "leads", leadDoc.id), {
       lastAiQuestion: question,
       lastAiReply: reply,
       lastAiReplyAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
     });
 
     console.log("FAQ AI replied:", sender);
@@ -167,32 +199,38 @@ export const startIncomingMessageListener = (sock) => {
 
       const leadDoc = await findLeadByChat(chatId, sender);
       const leadData = leadDoc?.data();
-      const confirmed = isConfirmation(cleanText);
       const addressConfirmed = canConfirmAddress(leadData, cleanText);
 
-      console.log("CONFIRM DETECT:", confirmed);
+      console.log("CONFIRM DETECT:", hasConfirmIntent(cleanText));
       console.log("ADDRESS CONFIRM DETECT:", addressConfirmed);
 
-      if (!addressConfirmed) {
-        await replyWithFaqAi({
-          sock,
-          chatId,
-          sender,
-          leadDoc,
-          question: cleanText,
+      if (addressConfirmed) {
+        if (!leadDoc) return;
+
+        console.log("Lead Found:", leadDoc.id);
+
+        await safeUpdate(doc(db, "leads", leadDoc.id), {
+          confirmation: "sudah",
+          state: "WAITING_UPSELL",
+          queuedForMessage: true,
+          nextSendAt: new Date(),
+          updatedAt: serverTimestamp(),
         });
+
+        console.log("Confirmation detected:", sender);
 
         return;
       }
 
-      console.log("Lead Found:", leadDoc.id);
-
-      await updateDoc(doc(db, "leads", leadDoc.id), {
-        confirmation: "sudah",
-        state: "WAITING_UPSELL",
-        queuedForMessage: true,
-        nextSendAt: new Date(),
-        updatedAt: serverTimestamp(),
+      if (cleanText.length < 3) {
+        return;
+      }
+      await replyWithFaqAi({
+        sock,
+        chatId,
+        sender,
+        leadDoc,
+        question: cleanText,
       });
 
       console.log("Confirmation detected:", sender);

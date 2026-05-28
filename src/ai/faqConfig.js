@@ -49,39 +49,19 @@ export const OUT_OF_SCOPE_REPLY =
 export const GREETING_REPLY =
   "Halo kak, ada yang bisa dibantu seputar pesanan kakak?";
 
-export const GENERAL_FACTS = {
-  discount: {
-    additional_discount: false,
-    answer: "Tidak ada diskon atau potongan tambahan.",
-  },
-  warranty_claim: {
-    required_evidence:
-      "Jika paket sudah sampai, simpan foto resi dan video unboxing untuk membantu laporan klaim garansi.",
-  },
-  fallback: "Maaf kak, detail itu belum tersedia di data pesanan kakak.",
-};
-
 export const ORDER_KEYWORDS = [
   "alamat",
   "bayar",
   "cod",
-  "diskon",
-  "garansi",
   "harga",
-  "estimasi",
   "kirim",
-  "kurir",
-  "lama",
   "ongkir",
   "order",
   "paket",
   "payment",
   "pembayaran",
-  "pengiriman",
   "pesanan",
-  "potongan",
   "produk",
-  "sampai",
   "total",
   "transfer",
 ];
@@ -129,8 +109,6 @@ export const INTENT_GROUPS = [
       "paket nyangkut",
     ],
     paths: [
-      "shipping.selected_region",
-      "shipping.selected_estimation",
       "shipping",
       "order.province",
       "order.addressClean",
@@ -171,13 +149,7 @@ export const INTENT_GROUPS = [
       "ada biaya tambahan",
       "bayar pas sampai",
     ],
-    paths: [
-      "pricing",
-      "general.discount",
-      "order.price",
-      "order.ongkir",
-      "order.productTitle",
-    ],
+    paths: ["pricing", "order.price", "order.productTitle"],
   },
 
   {
@@ -210,44 +182,7 @@ export const INTENT_GROUPS = [
       "bisa dana",
       "bisa gopay",
     ],
-    paths: ["order.paymentMethod", "pricing.cod", "general.discount"],
-  },
-
-  {
-    name: "warranty",
-    keywords: [
-      "garansi",
-      "retur",
-      "refund",
-      "rusak",
-      "cacat",
-      "claim",
-      "klaim",
-      "komplain",
-      "tukar",
-      "ganti barang",
-      "barang error",
-      "tidak berfungsi",
-      "rusak pas datang",
-      "pecah",
-      "tidak nyala",
-      "mati",
-      "tidak bisa dipakai",
-      "tidak sesuai",
-      "retur gimana",
-      "balikin barang",
-      "minta ganti",
-      "minta refund",
-      "mau klaim",
-      "komplain barang",
-    ],
-    paths: [
-      "pricing.warranty_days",
-      "warranty",
-      "policy",
-      "constraints",
-      "general.warranty_claim",
-    ],
+    paths: ["order.paymentMethod", "pricing.cod"],
   },
 
   {
@@ -395,20 +330,6 @@ export const INTENT_GROUPS = [
       "varian",
     ],
     paths: ["inventory", "product.stock"],
-  },
-
-  {
-    name: "order_status",
-    keywords: [
-      "status",
-      "sudah diproses",
-      "dipacking",
-      "diproses",
-      "pending",
-      "menunggu",
-      "sedang dikirim",
-    ],
-    paths: ["order.state", "shipping"],
   },
 
   {

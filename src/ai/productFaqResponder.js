@@ -2,13 +2,13 @@
 import { chatWithOllama } from "./ollamaClient.js";
 import { buildFaqSystemPrompt } from "./faqPrompt.js";
 import {
-  GENERAL_FACTS,
   GREETING_REPLY,
   INTENT_GROUPS,
   ORDER_KEYWORDS,
   OUT_OF_SCOPE_REPLY,
   STOP_WORDS,
 } from "./faqConfig.js";
+import { GENERAL_FAQ } from "./generalFaq.js";
 
 const formatMoney = (value) => {
   const number = Number(value) || 0;
@@ -47,13 +47,7 @@ const JAVA_PROVINCES = new Set([
   "yogyakarta",
 ]);
 
-const SEARCHABLE_PATHS = new Set([
-  "faq",
-  "shipping",
-  "policy",
-  "spec",
-  "features",
-]);
+const SEARCHABLE_PATHS = new Set(["faq", "features", "spec"]);
 
 const getLeadProvince = (lead) => {
   return (
@@ -71,6 +65,26 @@ const getShippingRegion = (lead) => {
   if (!province) return null;
 
   return JAVA_PROVINCES.has(province) ? "jawa" : "luar_jawa";
+};
+
+const findGeneralReply = ({ lead, question }) => {
+  const sortedFaq = [...GENERAL_FAQ].sort(
+    (a, b) => (a.priority || 999) - (b.priority || 999),
+  );
+  for (const faq of sortedFaq) {
+    const matched = faq.keywords.some((k) =>
+      includesPhraseOrToken(question, k),
+    );
+
+    if (matched) {
+      return faq.handler({
+        lead,
+        getShippingRegion,
+      });
+    }
+  }
+
+  return null;
 };
 
 const getPaymentMethod = (lead) => {
@@ -101,16 +115,6 @@ const isGreeting = (question) => {
     "assalamualaikum",
     "permisi",
   ].includes(normalized);
-};
-
-const detectIntent = (question) => {
-  const q = normalizeText(question);
-
-  const matched = INTENT_GROUPS.find((intent) =>
-    intent.keywords.some((keyword) => includesPhraseOrToken(q, keyword)),
-  );
-
-  return matched?.name || "default";
 };
 
 const buildLeadContext = (lead) => {
@@ -167,7 +171,7 @@ const flattenKnowledge = (value, path = "") => {
     });
   }
 
-  if (typeof value === "object") {
+  if (typeof value === "object" && value !== null) {
     return Object.entries(value).flatMap(([key, item]) => {
       const currentPath = `${path}.${key}`.replace(/^\./, "");
 
@@ -254,27 +258,6 @@ const addFactByPath = ({ facts, lead, product, path }) => {
     return;
   }
 
-  if (path.startsWith("general.")) {
-    addFact(
-      facts,
-      path,
-      getByPath(GENERAL_FACTS, path.replace("general.", "")),
-    );
-    return;
-  }
-
-  if (path === "shipping.selected_region") {
-    addFact(facts, path, getShippingRegion(lead));
-    return;
-  }
-
-  if (path === "shipping.selected_estimation") {
-    const region = getShippingRegion(lead);
-    const estimation = region ? product?.shipping?.regions?.[region] : null;
-    addFact(facts, path, estimation);
-    return;
-  }
-
   addFact(facts, path, getByPath(product, path));
 };
 
@@ -295,7 +278,7 @@ const includesPhraseOrToken = (question, phrase) => {
 const getFaqMatchedFacts = (product, question) => {
   const facts = [];
 
-  for (const faq of product.faq || []) {
+  for (const faq of product?.faq || []) {
     const intents = faq.intent || [];
 
     const matched = intents.some((intent) =>
@@ -400,7 +383,7 @@ const buildRelevantFacts = ({ lead, product, question }) => {
   if (!hasStrongMatch) return { isRelated: false, text: "" };
 
   const intentFacts = getIntentMatchedFacts({ lead, product, question });
-  const searchFacts = getSearchMatchedFacts(product, question);
+  const searchFacts = product ? getSearchMatchedFacts(product, question) : [];
 
   const facts = [...orderFacts, ...faqFacts, ...intentFacts, ...searchFacts];
 
@@ -415,6 +398,15 @@ const buildRelevantFacts = ({ lead, product, question }) => {
 export const buildProductFaqReply = async ({ lead, product, question }) => {
   if (isGreeting(question)) {
     return GREETING_REPLY;
+  }
+
+  const generalReply = findGeneralReply({
+    lead,
+    question,
+  });
+
+  if (generalReply) {
+    return generalReply;
   }
 
   const relevantFacts = buildRelevantFacts({ lead, product, question });
