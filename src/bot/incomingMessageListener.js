@@ -13,7 +13,6 @@ import { jidNormalizedUser } from "@whiskeysockets/baileys";
 
 import { db } from "../firebase/firebase.js";
 import { isAddressConfirmation } from "../utils/messageDetector.js";
-import { hasConfirmIntent } from "../utils/confirmationDetector.js";
 import { buildProductFaqReply } from "../ai/productFaqResponder.js";
 import { findProductForLead } from "../firebase/productRepository.js";
 import { sendMessage } from "../utils/helpers.js";
@@ -74,26 +73,11 @@ const timestampToMillis = (value) => {
 
 const canConfirmAddress = (lead, text) => {
   if (!lead) return false;
-
   if (lead.confirmation !== "belum") return false;
-
   if (lead.state !== "WAITING_CONFIRMATION") return false;
-
   if (lead.lastMessageState !== "WAITING_CONFIRMATION") return false;
 
-  if (isAddressConfirmation(text)) {
-    return true;
-  }
-
-  if (!hasConfirmIntent(text)) {
-    return false;
-  }
-
-  const lastOrderMessageAt = timestampToMillis(lead.lastMessageAt);
-
-  const lastAiReplyAt = timestampToMillis(lead.lastAiReplyAt);
-
-  return lastAiReplyAt <= lastOrderMessageAt;
+  return isAddressConfirmation(text);
 };
 
 const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
@@ -201,7 +185,6 @@ export const startIncomingMessageListener = (sock) => {
       const leadData = leadDoc?.data();
       const addressConfirmed = canConfirmAddress(leadData, cleanText);
 
-      console.log("CONFIRM DETECT:", hasConfirmIntent(cleanText));
       console.log("ADDRESS CONFIRM DETECT:", addressConfirmed);
 
       if (addressConfirmed) {
