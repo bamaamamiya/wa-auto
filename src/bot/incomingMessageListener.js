@@ -88,6 +88,11 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
 
   try {
     const lead = leadDoc.data();
+    // 🔴 kalau sudah handover ke human, bot diam
+    if (lead.aiMode === "human") {
+      console.log("AI handover active, skip reply:", sender);
+      return;
+    }
     const lastReply = timestampToMillis(lead.lastAiReplyAt);
     if (Date.now() - lastReply < 3000) {
       console.log("Skip rapid reply");
@@ -130,10 +135,26 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
 
     await sendMessage(sock, chatId, reply);
 
+    const isFallback = reply === "Maaf kak, mohon tunggu sebentar ya 🙏";
+    const currentFallbackCount =
+      (lead.aiFallbackCount || 0) + (isFallback ? 1 : 0);
+    const shouldHandover = currentFallbackCount >= 3;
+
+    if (shouldHandover) {
+      await sendMessage(
+        sock,
+        chatId,
+        "Mohon tunggu ya kak, kami sambungkan ke CS kami 🙏",
+      );
+    }
+
     await safeUpdate(doc(db, "leads", leadDoc.id), {
       lastAiQuestion: question,
       lastAiReply: reply,
       lastAiReplyAt: serverTimestamp(),
+      aiFallbackCount: shouldHandover ? 0 : currentFallbackCount,
+      aiMode: shouldHandover ? "human" : lead.aiMode || "auto",
+      ...(shouldHandover && { aiHandoverAt: serverTimestamp() }),
     });
 
     console.log("FAQ AI replied:", sender);
@@ -142,7 +163,10 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
   }
 };
 
-export const startIncomingMessageListener = (sock) => {
+export const startIncomingMessageListener = (
+  sock,
+  { addressConfirmation = true, productFaqAi = true } = {},
+) => {
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const msg = messages?.[0];
@@ -183,7 +207,8 @@ export const startIncomingMessageListener = (sock) => {
 
       const leadDoc = await findLeadByChat(chatId, sender);
       const leadData = leadDoc?.data();
-      const addressConfirmed = canConfirmAddress(leadData, cleanText);
+      const addressConfirmed =
+        addressConfirmation && canConfirmAddress(leadData, cleanText);
 
       console.log("ADDRESS CONFIRM DETECT:", addressConfirmed);
 
@@ -208,6 +233,12 @@ export const startIncomingMessageListener = (sock) => {
       if (cleanText.length < 3) {
         return;
       }
+
+      if (!productFaqAi) {
+        console.log("Product FAQ AI disabled");
+        return;
+      }
+
       await replyWithFaqAi({
         sock,
         chatId,

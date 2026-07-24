@@ -1,76 +1,61 @@
 import {
- collection,
- query,
- where,
- getDocs,
- updateDoc,
- doc,
- serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  updateDoc,
+  doc,
+  serverTimestamp,
 } from "firebase/firestore";
 
 import { db } from "../firebase/firebase.js";
 import { sendMessage } from "../utils/helpers.js";
 
 export const processConfirmationReminder = async (sock) => {
- try {
-   const now = new Date();
+  try {
+    const now = new Date();
 
-   const snap = await getDocs(
-     query(
-       collection(db, "leads"),
-       where("confirmation", "==", "belum"),
-       where("state", "==", "WAITING_CONFIRMATION"),
-     ),
-   );
+    const snap = await getDocs(
+      query(
+        collection(db, "leads"),
+        where("confirmation", "==", "belum"),
+        where("state", "==", "WAITING_CONFIRMATION"),
+        where("automation", "==", true),
+      ),
+    );
 
-   for (const leadDoc of snap.docs) {
-     const lead = leadDoc.data();
+    for (const leadDoc of snap.docs) {
+      const lead = leadDoc.data();
 
-     if (!lead.reminderConfig?.enabled) continue;
+      // skip kalau sudah pernah reminder
+      if ((lead.reminderCount || 0) >= 1) continue;
 
-     const max =
-       lead.reminderConfig.maxReminder || 1;
+      // skip kalau belum ada lastMessageAt
+      if (!lead.lastMessageAt) continue;
 
-     if ((lead.reminderCount || 0) >= max) continue;
+      const lastMessageAt = lead.lastMessageAt.toMillis?.() || 0;
+      const twoHours = 2 * 60 * 60 * 1000;
 
-     const next =
-       lead.nextReminderAt?.toDate?.();
+      // skip kalau belum 2 jam
+      if (now - lastMessageAt < twoHours) continue;
 
-     if (!next || next > now) continue;
+      // skip kalau tidak ada chatId
+      if (!lead.chatId) continue;
 
-     await sendMessage(
-       sock,
-       lead.chatId,
-`
-Halo kak 🙏
-Kami ingin memastikan alamat pesanan sudah sesuai.
+      await sendMessage(
+        sock,
+        lead.chatId,
+        "Halo kak 🙏 Kami ingin memastikan pesanan kakak sudah dikonfirmasi. Jika alamat sudah benar cukup balas: iya / sudah benar / lanjut ya kak 🙏",
+      );
 
-Jika alamat sudah benar cukup balas:
-• iya
-• sudah benar
-• lanjut
+      await updateDoc(doc(db, "leads", leadDoc.id), {
+        reminderCount: 1,
+        lastReminderAt: serverTimestamp(),
+      });
 
-Jika ada revisi cukup kirim alamat yang benar ya kak
-`.trim(),
-     );
-
-     await updateDoc(
-       doc(db, "leads", leadDoc.id),
-       {
-         reminderCount:
-           (lead.reminderCount || 0) + 1,
-
-         nextReminderAt: new Date(
-           Date.now() +
-             lead.reminderConfig.intervalMinute *
-               60000,
-         ),
-
-         updatedAt: serverTimestamp(),
-       },
-     );
-   }
- } catch (e) {
-   console.log("Reminder error", e);
- }
+      console.log("Reminder sent:", lead.whatsapp);
+    }
+  } catch (e) {
+    console.log("Reminder error", e);
+  }
 };
