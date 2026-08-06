@@ -1,3 +1,4 @@
+// bot/incomingMessageListener.js
 import {
   collection,
   query,
@@ -80,7 +81,7 @@ const canConfirmAddress = (lead, text) => {
   return isAddressConfirmation(text);
 };
 
-const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
+const replyWithFaqAi = async ({ chatId, sender, leadDoc, question }) => {
   if (!leadDoc) {
     console.log("FAQ lead not found for:", chatId);
     return;
@@ -89,8 +90,7 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
   try {
     const lead = leadDoc.data();
     // 🔴 kalau sudah handover ke human, bot diam
-    if (lead.aiMode === "human") {
-      console.log("AI handover active, skip reply:", sender);
+    if (!lead.automation?.ai?.enabled) {
       return;
     }
     const lastReply = timestampToMillis(lead.lastAiReplyAt);
@@ -133,7 +133,7 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
     console.log(reply);
     console.log("=============================\n");
 
-    await sendMessage(sock, chatId, reply);
+    await sendMessage(chatId, reply);
 
     const isFallback = reply === "Maaf kak, mohon tunggu sebentar ya 🙏";
     const currentFallbackCount =
@@ -142,7 +142,6 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
 
     if (shouldHandover) {
       await sendMessage(
-        sock,
         chatId,
         "Mohon tunggu ya kak, kami sambungkan ke CS kami 🙏",
       );
@@ -153,7 +152,6 @@ const replyWithFaqAi = async ({ sock, chatId, sender, leadDoc, question }) => {
       lastAiReply: reply,
       lastAiReplyAt: serverTimestamp(),
       aiFallbackCount: shouldHandover ? 0 : currentFallbackCount,
-      aiMode: shouldHandover ? "human" : lead.aiMode || "auto",
       ...(shouldHandover && { aiHandoverAt: serverTimestamp() }),
     });
 
@@ -167,7 +165,7 @@ export const startIncomingMessageListener = (
   sock,
   { addressConfirmation = true, productFaqAi = true } = {},
 ) => {
-  sock.ev.on("messages.upsert", async ({ messages }) => {
+  const handler = async ({ messages }) => {
     try {
       const msg = messages?.[0];
 
@@ -239,8 +237,8 @@ export const startIncomingMessageListener = (
         return;
       }
 
+
       await replyWithFaqAi({
-        sock,
         chatId,
         sender,
         leadDoc,
@@ -251,5 +249,13 @@ export const startIncomingMessageListener = (
     } catch (err) {
       console.error("Incoming listener error:", err);
     }
-  });
+  };
+
+  sock.ev.on("messages.upsert", handler);
+
+  return () => {
+    if (typeof sock.ev.off === "function") {
+      sock.ev.off("messages.upsert", handler);
+    }
+  };
 };

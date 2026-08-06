@@ -29,6 +29,7 @@ Thumbs.db
 
 # Session WhatsApp (CRITICAL)
 session/
+.session/
 
 # Temporary files
 tmp/

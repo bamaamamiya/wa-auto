@@ -1,3 +1,4 @@
+// bot/confirmationReminder.js
 import {
   collection,
   query,
@@ -11,7 +12,7 @@ import {
 import { db } from "../firebase/firebase.js";
 import { sendMessage } from "../utils/helpers.js";
 
-export const processConfirmationReminder = async (sock) => {
+export const processConfirmationReminder = async () => {
   try {
     const now = new Date();
 
@@ -43,7 +44,6 @@ export const processConfirmationReminder = async (sock) => {
       if (!lead.chatId) continue;
 
       await sendMessage(
-        sock,
         lead.chatId,
         "Halo kak 🙏 Kami ingin memastikan pesanan kakak sudah dikonfirmasi. Jika alamat sudah benar cukup balas: iya / sudah benar / lanjut ya kak 🙏",
       );

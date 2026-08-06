@@ -4,7 +4,6 @@ import {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
-import { setConnected } from "../states/connection.js";
 import pino from "pino";
 import readline from "readline";
 
@@ -41,7 +40,7 @@ export async function startWhatsApp() {
     } catch {}
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState("./session");
+  const { state, saveCreds } = await useMultiFileAuthState("./.session");
 
   const { version } = await fetchLatestBaileysVersion();
 
@@ -56,6 +55,13 @@ export async function startWhatsApp() {
 
   console.log("🔌 Socket created");
 
+  console.log("========== EVENT EMITTER ==========");
+  console.log("off:", typeof sock.ev.off);
+  console.log("removeListener:", typeof sock.ev.removeListener);
+  console.log("removeAllListeners:", typeof sock.ev.removeAllListeners);
+  console.log("on:", typeof sock.ev.on);
+  console.log("==================================");
+
   // 🔐 Pairing
   if (usePairingCode && !sock.authState.creds.registered) {
     console.log("🔑 Device belum terdaftar...");
@@ -68,31 +74,6 @@ export async function startWhatsApp() {
 
   // 💾 Save session
   sock.ev.on("creds.update", saveCreds);
-
-  // 🔥 CONNECTION HANDLER
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect } = update;
-
-    if (connection === "open") {
-      console.log("✅ WhatsApp Connected");
-      setConnected(true);
-    }
-
-    if (connection === "close") {
-      console.log("❌ WA Disconnect");
-      setConnected(false);
-
-      if (lastDisconnect?.error) {
-        console.error("⚠️", lastDisconnect.error?.output?.statusCode);
-      }
-
-      console.log("🔄 Reconnecting in 5 seconds...");
-
-      setTimeout(() => {
-        startWhatsApp();
-      }, 5000);
-    }
-  });
 
   return sock;
 }

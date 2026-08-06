@@ -5,32 +5,123 @@ import { startSendAtWorker } from "./firebase/leadsListener.js";
 import { startServer } from "./server.js";
 import { startIncomingMessageListener } from "./bot/incomingMessageListener.js";
 import { startScheduler } from "./bot/scheduler.js";
-
-const features = {
+import { setConnected } from "./states/connection.js";
+import { log } from "./utils/logger.js";
+export const features = {
   whatsapp: true,
   sendAtWorker: true,
   incomingMessageListener: true,
   addressConfirmation: true,
-  productFaqAi: true,
   confirmationReminderScheduler: false,
   apiServer: true,
 };
 
+let servicesInitialized = false;
+let reconnecting = false;
+let removeIncomingListener = null;
+
 const logFeatureStatus = () => {
-  console.log("Feature flags:", features);
+  log.debug(features);
 };
 
 const runFeature = (name, callback) => {
   if (!features[name]) {
-    console.log(`Feature disabled: ${name}`);
+		log.warn(`Feature disabled: ${name}`);
     return;
   }
 
   callback();
 };
 
+async function shutdown() {
+  log.warn("Shutdown...");
+
+  setConnected(false);
+
+  if (removeIncomingListener) {
+    removeIncomingListener();
+  }
+
+  process.exit(0);
+}
+
+async function connectWhatsApp() {
+  const sock = await startWhatsApp();
+
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+    if (connection) {
+      log.wa(`Connection: ${connection}`);
+    }
+
+    if (connection === "open") {
+      reconnecting = false;
+      setConnected(true);
+
+      log.success("WhatsApp connected");
+
+      // Service cukup dijalankan sekali
+      if (!servicesInitialized) {
+        servicesInitialized = true;
+
+        runFeature("sendAtWorker", () => startSendAtWorker());
+
+        runFeature("confirmationReminderScheduler", () => startScheduler(sock));
+
+        runFeature("apiServer", () => startServer());
+
+        log.success("Background services started");
+      }
+
+      runFeature("incomingMessageListener", () => {
+        if (removeIncomingListener) {
+          removeIncomingListener();
+          removeIncomingListener = null;
+        }
+
+        removeIncomingListener = startIncomingMessageListener(sock, {
+          addressConfirmation: features.addressConfirmation,
+        });
+      });
+
+      log.success("System ready");
+      return;
+    }
+
+    if (connection === "close") {
+      setConnected(false);
+
+      log.wa("Disconnected");
+
+      if (lastDisconnect?.error) {
+        log.error(lastDisconnect.error);
+      }
+
+      if (reconnecting) {
+        log.warn("Reconnect already in progress...");
+        return;
+      }
+
+      reconnecting = true;
+
+      log.info("Reconnecting in 5 seconds...");
+
+      setTimeout(async () => {
+        try {
+          await connectWhatsApp();
+        } catch (err) {
+          log.error("Reconnect failed:", err);
+          reconnecting = false;
+        }
+      }, 5000);
+    }
+  });
+}
+
 async function start() {
-  console.log("Starting automation server...");
+  console.log("================================");
+  log.info("🚀 Starting automation server...");
+  console.log("================================");
+
   logFeatureStatus();
 
   if (!features.whatsapp) {
@@ -38,35 +129,15 @@ async function start() {
     return;
   }
 
-  const sock = await startWhatsApp();
-
-  let initialized = false;
-
-  sock.ev.on("connection.update", ({ connection }) => {
-    console.log("WA Connection:", connection);
-
-    if (connection !== "open") return;
-
-    if (initialized) {
-      console.log("Services already running");
-      return;
-    }
-
-    initialized = true;
-
-    console.log("WhatsApp connected");
-    runFeature("sendAtWorker", () => startSendAtWorker());
-    runFeature("incomingMessageListener", () =>
-      startIncomingMessageListener(sock, {
-        addressConfirmation: features.addressConfirmation,
-        productFaqAi: features.productFaqAi,
-      }),
-    );
-    runFeature("confirmationReminderScheduler", () => startScheduler(sock));
-    runFeature("apiServer", () => startServer(sock));
-
-    console.log("System ready");
-  });
+  try {
+    await connectWhatsApp();
+  } catch (err) {
+    log.error("Failed to start WhatsApp", err);
+    process.exit(1);
+  }
 }
 
 start();
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
