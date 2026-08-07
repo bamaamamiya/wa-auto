@@ -20,8 +20,13 @@ import { isConnected } from "../states/connection.js";
 import { buildOrderMessage } from "../templates/messageTemplate.js";
 import { sendMessage } from "../utils/helpers.js";
 import { getSock } from "../bot/whatsappBot.js";
+import { getProductAutomation } from "../utils/getProductAutomation.js";
 
 const leadsRef = collection(db, "leads");
+
+const MAX_RETRY = 3;
+const PROCESSING_TIMEOUT = 30000;
+const RETRY_DELAY = 15000;
 
 export const startSendAtWorker = () => {
   console.log("🚀 Realtime Worker starting...");
@@ -30,10 +35,8 @@ export const startSendAtWorker = () => {
 
   const q = query(
     leadsRef,
-    where("automation", "==", true),
-    where("queuedForMessage", "==", true),
-    where("state", "==", "WAITING_CONFIRMATION"),
-    orderBy("nextSendAt"),
+    where("aiStatus", "==", "QUEUED"),
+    orderBy("createdAt"),
     limit(5),
   );
 
@@ -55,13 +58,14 @@ export const startSendAtWorker = () => {
 
       isRunning = true;
 
-      const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+      const sleep = (ms) =>
+        new Promise((resolve) => setTimeout(resolve, ms));
 
       try {
         for (const docSnap of snapshot.docs) {
           await processLead(docSnap);
 
-          // random delay anti spam
+          // Random delay anti-spam
           const delay = Math.floor(Math.random() * 8000) + 3000;
 
           console.log(`😴 Sleep ${delay}ms`);
@@ -85,66 +89,170 @@ const processLead = async (docSnap) => {
   const leadId = docSnap.id;
 
   try {
+    /*
+     * ============================================================
+     * STEP 1
+     * Ambil data lead terbaru + cek Product Automation Policy
+     * ============================================================
+     */
+
+    const leadData = docSnap.data();
+
+    if (leadData.aiStatus !== "QUEUED") {
+      console.log("⏭️ Lead no longer queued:", leadId);
+      return;
+    }
+
+    if (!leadData.productId) {
+      console.log("❌ Product ID missing:", leadId);
+
+      await updateDoc(doc(db, "leads", leadId), {
+        aiStatus: "FAILED",
+        isProcessing: false,
+        aiProcessingAt: null,
+        updatedAt: serverTimestamp(),
+      });
+
+      return;
+    }
+
+    const automationConfig = await getProductAutomation(
+      leadData.productId,
+    );
+
+    if (!automationConfig) {
+      console.log("❌ Automation config not found:", {
+        leadId,
+        productId: leadData.productId,
+      });
+
+      await updateDoc(doc(db, "leads", leadId), {
+        aiStatus: "FAILED",
+        isProcessing: false,
+        aiProcessingAt: null,
+        updatedAt: serverTimestamp(),
+      });
+
+      return;
+    }
+
+    const automation = automationConfig.automation || {};
+
+    console.log("🤖 AUTOMATION POLICY:", {
+      leadId,
+      productId: leadData.productId,
+      automation,
+    });
+
+    /*
+     * ============================================================
+     * STEP 2
+     * PRODUCT POLICY GATE
+     *
+     * Product menentukan apakah AI boleh berjalan.
+     * ============================================================
+     */
+
+    if (!automation.aiAgent) {
+      console.log("⏭️ AI disabled for product:", {
+        leadId,
+        productId: leadData.productId,
+      });
+
+      await updateDoc(doc(db, "leads", leadId), {
+        aiStatus: "SKIPPED",
+        isProcessing: false,
+        aiProcessingAt: null,
+        updatedAt: serverTimestamp(),
+      });
+
+      return;
+    }
+
+    /*
+     * ============================================================
+     * STEP 3
+     * LOCK LEAD
+     *
+     * Hanya setelah product policy mengizinkan AI,
+     * kita lock lead sebagai PROCESSING.
+     * ============================================================
+     */
+
     const lockedData = await runTransaction(db, async (transaction) => {
       const ref = doc(db, "leads", leadId);
 
       const snap = await transaction.get(ref);
 
-      if (!snap.exists()) return null;
+      if (!snap.exists()) {
+        return null;
+      }
 
       const data = snap.data();
 
+      // Lead mungkin sudah diproses oleh worker lain.
+      if (data.aiStatus !== "QUEUED") {
+        return null;
+      }
+
       const now = Date.now();
 
-      const lastAt = data.lastMessageAt?.toMillis?.() || 0;
-      const nextSend = data.nextSendAt?.toMillis?.() || 0;
-      const processingAt = data.isProcessingAt?.toMillis?.() || 0;
+      const processingAt =
+        data.aiProcessingAt?.toMillis?.() || 0;
 
-      const delay = 15000;
-
-      // validation
-      if (data.state !== "WAITING_CONFIRMATION") return null;
-
-      if (!data.queuedForMessage) return null;
-
-      if (now < nextSend) return null;
-
-      if (now - lastAt < delay) return null;
-
-      // lock protection
-      if (data.isProcessing && now - processingAt < 30000) {
+      /*
+       * Kalau masih PROCESSING dan belum timeout,
+       * jangan ambil alih.
+       */
+      if (
+        data.isProcessing &&
+        now - processingAt < PROCESSING_TIMEOUT
+      ) {
         console.log("🔒 Still processing:", leadId);
         return null;
       }
 
-      // retry limit
-      if ((data.retryCount || 0) >= 3) {
-        console.log("❌ Retry limit:", leadId);
+      /*
+       * Retry limit
+       */
+      const retryCount = data.aiRetryCount || 0;
+
+      if (retryCount >= MAX_RETRY) {
+        console.log("❌ AI retry limit:", leadId);
 
         transaction.update(ref, {
-          state: "FAILED",
+          aiStatus: "FAILED",
           isProcessing: false,
+          aiProcessingAt: null,
+          updatedAt: serverTimestamp(),
         });
 
         return null;
       }
 
-      // anti duplicate
-      if (data.lastMessageState === data.state) {
-        console.log("⏭️ Already sent:", leadId);
-        return null;
-      }
-
-      // LOCK
+      /*
+       * LOCK
+       */
       transaction.update(ref, {
+        aiStatus: "PROCESSING",
         isProcessing: true,
-        isProcessingAt: serverTimestamp(),
+        aiProcessingAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
 
       return data;
     });
 
-    if (!lockedData) return;
+    if (!lockedData) {
+      return;
+    }
+
+    /*
+     * ============================================================
+     * STEP 4
+     * CHECK WHATSAPP CONNECTION
+     * ============================================================
+     */
 
     const bot = getSock();
 
@@ -158,14 +266,24 @@ const processLead = async (docSnap) => {
       console.log("⛔ WA not connected:", lockedData.whatsapp);
 
       await updateDoc(doc(db, "leads", leadId), {
+        aiStatus: "QUEUED",
         isProcessing: false,
-
-        // retry lagi 15 detik
-        nextSendAt: Timestamp.fromMillis(Date.now() + 15000),
+        aiProcessingAt: null,
+        nextSendAt: Timestamp.fromMillis(
+          Date.now() + RETRY_DELAY,
+        ),
+        updatedAt: serverTimestamp(),
       });
 
       return;
     }
+
+    /*
+     * ============================================================
+     * STEP 5
+     * BUILD ORDER NOTIFICATION
+     * ============================================================
+     */
 
     const chatId = formatPhone(lockedData.whatsapp);
 
@@ -181,37 +299,53 @@ const processLead = async (docSnap) => {
       console.log("❌ Empty message:", leadId);
 
       await updateDoc(doc(db, "leads", leadId), {
+        aiStatus: "FAILED",
         isProcessing: false,
+        aiProcessingAt: null,
+        updatedAt: serverTimestamp(),
       });
 
       return;
     }
 
-    console.log("📤 Sending:", {
+    /*
+     * ============================================================
+     * STEP 6
+     * SEND ORDER NOTIFICATION
+     * ============================================================
+     */
+
+    console.log("📤 Sending Order Notification:", {
       leadId,
       chatId,
     });
 
-    await sendMessage(bot, chatId, message);
+    await sendMessage(chatId, message);
 
     console.log("✅ Message sent:", leadId);
 
+    /*
+     * ============================================================
+     * STEP 7
+     * MARK SUCCESS
+     * ============================================================
+     */
+
     await updateDoc(doc(db, "leads", leadId), {
       chatId,
-      state: "WAITING_CONFIRMATION",
 
-      lastMessageState: "WAITING_CONFIRMATION",
-
-      lastMessageAt: serverTimestamp(),
-
-      queuedForMessage: false,
+      aiStatus: "SENT",
 
       isProcessing: false,
+      aiProcessingAt: null,
 
-      retryCount: 0,
+      aiLastSentAt: serverTimestamp(),
+      aiRetryCount: 0,
+
+      updatedAt: serverTimestamp(),
     });
 
-    console.log("✅ DONE:", leadId);
+    console.log("✅ AI DONE:", leadId);
   } catch (err) {
     console.error("❌ PROCESS ERROR:", {
       leadId,
@@ -219,16 +353,66 @@ const processLead = async (docSnap) => {
       stack: err.stack,
     });
 
+    /*
+     * ============================================================
+     * ERROR / RETRY
+     * ============================================================
+     */
+
     try {
-      await updateDoc(doc(db, "leads", leadId), {
-        isProcessing: false,
+      const leadRef = doc(db, "leads", leadId);
 
-        retryCount: (docSnap.data().retryCount || 0) + 1,
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(leadRef);
 
-        nextSendAt: Timestamp.fromMillis(Date.now() + 15000),
+        if (!snap.exists()) return;
+
+        const data = snap.data();
+
+        const currentRetry = data.aiRetryCount || 0;
+        const nextRetry = currentRetry + 1;
+
+        if (nextRetry >= MAX_RETRY) {
+          transaction.update(leadRef, {
+            aiStatus: "FAILED",
+            isProcessing: false,
+            aiProcessingAt: null,
+            aiRetryCount: nextRetry,
+            updatedAt: serverTimestamp(),
+          });
+
+          console.log("❌ AI FAILED permanently:", {
+            leadId,
+            retryCount: nextRetry,
+          });
+
+          return;
+        }
+
+        transaction.update(leadRef, {
+          aiStatus: "QUEUED",
+          isProcessing: false,
+          aiProcessingAt: null,
+
+          aiRetryCount: nextRetry,
+
+          nextSendAt: Timestamp.fromMillis(
+            Date.now() + RETRY_DELAY,
+          ),
+
+          updatedAt: serverTimestamp(),
+        });
+
+        console.log("🔄 AI retry scheduled:", {
+          leadId,
+          retryCount: nextRetry,
+        });
       });
     } catch (updateErr) {
-      console.error("❌ Failed update retry:", updateErr);
+      console.error(
+        "❌ Failed update AI retry:",
+        updateErr,
+      );
     }
   }
 };

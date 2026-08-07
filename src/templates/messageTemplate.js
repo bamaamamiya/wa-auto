@@ -26,12 +26,9 @@ Total Pembayaran: ${formatHargaSingkat(total)}
 Nama: ${data.name || "-"}
 Alamat Lengkap: ${data.addressClean || "-"}
 
-Mohon dicek kembali ya kak 🙏
+Pesanan akan segera diproses sesuai data yang telah dikirim saat checkout.
 
-Jika data & alamat sudah sesuai → cukup balas bebas seperti:
-iya / sudah benar / lanjut
-
-Untuk ongkir, akan dihitung otomatis dan dianggap disetujui oleh sistem.
+Terima kasih sudah pesan di toko kami 🙏
 `;
 
   return pesan.trim();

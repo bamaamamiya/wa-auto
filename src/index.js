@@ -11,7 +11,7 @@ export const features = {
   whatsapp: true,
   sendAtWorker: true,
   incomingMessageListener: true,
-  addressConfirmation: true,
+  addressConfirmation: false,
   confirmationReminderScheduler: false,
   apiServer: true,
 };
